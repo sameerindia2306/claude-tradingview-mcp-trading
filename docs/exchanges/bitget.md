@@ -9,28 +9,32 @@
 
 ---
 
-## Steps
+## Steps (Mobile App)
 
-1. Log into your BitGet account at bitget.com
-2. Click your profile icon (top right) → **API Management**
-3. Click **Create API**
+1. Download the BitGet app and log in
+2. Tap the **Home** button at the bottom left
+3. Tap your **profile picture** at the top left
+4. Scroll down to the bottom and tap **More Services**
+5. Along the top menu you'll see: Popular, Rewards, Earn, Trading, Assets, Tools — tap **Tools**
+6. Tap **API Keys**
+7. Tap **Create API Key** → **Automatically Generated API Keys**
 
 ### Fill in the details
 
-- **API Name** — give it a label like `claude-trading`
-- **Passphrase** — create a passphrase yourself. This is not your account password — it's a separate phrase just for this API key. Write it down immediately. You cannot recover it later.
-- **IP Whitelist** — ON ✓
-  - Google "what is my IP address", copy it, paste it in
-- **Permissions:**
+- **Name** — give it a label, e.g. `Trader Thing`
+- **Passphrase** — create one yourself. This is personal to you — write it down immediately. You cannot recover it later.
+- **Bind IP Address** — optional, but recommended if you're running the bot from a fixed IP. Google "what is my IP address" and paste it in.
+- **Permissions** — select what you need. At minimum:
+  - **Spot Trading** — ON ✓
   - **Read** — ON ✓
-  - **Trade** — ON ✓
-  - **Withdrawals** — **OFF** — never turn this on
+  - Futures Open Interest, Spot Margin, Copy Trading, Taxation, Sub Accounts — optional, up to you
+  - **Crypto Loans, P2P, Transfer, Withdrawals** — **OFF** — never turn these on
 
-4. Click **Next** and complete your 2FA verification
+8. Tap **Confirm** and complete the verification process (email / 2FA)
 
 ### Copy your credentials
 
-You'll see your **API Key** and **Secret Key** on screen.
+Your **API Key** and **Secret Key** appear on screen after verification.
 
 > ⚠️ The Secret Key is only shown once. Copy it immediately and save it somewhere safe. If you lose it, you'll need to delete this key and create a new one.
 
