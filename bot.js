@@ -1,12 +1,13 @@
 /**
  * Sameer Trading Bot — Pepperstone / cTrader
- * Assets: Forex (EURUSD, GBPUSD, USDJPY) · Gold (XAUUSD) · Tech stocks (AAPL, TSLA, NVDA)
- * Data:   Twelve Data API (free tier)
- * Exec:   cTrader Open API (Pepperstone live account)
+ * Data:      Twelve Data API (free tier, 800 credits/day)
+ * Execution: cTrader Open API (Pepperstone)
+ * Symbols:   Top 13 trending from 30-symbol pool (scored every Sunday) + XAUUSD always
  * Strategies:
- *   XAUUSD  → ICT Silver Bullet (FVG + liquidity, 3 NY windows)
- *   Stocks  → EMA(9/21) cross + VWAP + RSI(14) momentum (trend-following)
- *   Forex   → London/NY breakout + EMA(9/21) cross + FVG confirmation
+ *   XAUUSD → ICT Silver Bullet — FVG entry in 4 NY/London time windows
+ *   Stocks → EMA(9/21) + VWAP + RSI(14) momentum, NYSE session only
+ *   Forex  → Session breakout + EMA(9/21) + FVG confirmation
+ * Risk:    ATR-based TP/SL · trailing stop to breakeven · −3% daily loss limit
  */
 
 import "dotenv/config";
@@ -203,20 +204,13 @@ function isInSilverBulletWindow() {
 }
 
 function detectFVG(candles) {
-  // Scan last 10 candles for the most recent Fair Value Gap
   for (let i = candles.length - 1; i >= 2; i--) {
     const prev2 = candles[i - 2];
     const curr  = candles[i];
-
-    // Bullish FVG: gap between high of candle[i-2] and low of candle[i]
-    if (curr.low > prev2.high) {
+    if (curr.low > prev2.high)
       return { type: "bullish", top: curr.low, bottom: prev2.high, mid: (curr.low + prev2.high) / 2, index: i };
-    }
-
-    // Bearish FVG: gap between low of candle[i-2] and high of candle[i]
-    if (curr.high < prev2.low) {
+    if (curr.high < prev2.low)
       return { type: "bearish", top: prev2.low, bottom: curr.high, mid: (prev2.low + curr.high) / 2, index: i };
-    }
   }
   return null;
 }
@@ -238,7 +232,7 @@ function runSilverBulletCheck(candles) {
 
   const inFVG = price >= fvg.bottom && price <= fvg.top;
   check(`Price retracing into FVG (${fvg.bottom.toFixed(2)}–${fvg.top.toFixed(2)})`, inFVG);
-  check(`FVG direction: ${fvg.type.toUpperCase()}`, true);
+  console.log(`  ℹ️  FVG direction: ${fvg.type.toUpperCase()}`);
 
   const allPass = results.every(r => r.pass);
   const side    = fvg.type === "bullish" ? "buy" : "sell";
@@ -521,18 +515,16 @@ async function runSymbol(symbol, log) {
   try { candles = await fetchCandles(symbol, 100); }
   catch (err) { console.log(`  ⚠️  Data error: ${err.message}`); return; }
 
-  const closes   = candles.map(c => c.close);
-  const price    = closes[closes.length - 1];
-  const ema8     = calcEMA(closes, 8);
-  const vwap     = calcVWAP(candles);
-  const atr      = calcATR(candles, 14);
+  const closes = candles.map(c => c.close);
+  const price  = closes[closes.length - 1];
+  const vwap   = calcVWAP(candles);
+  const atr    = calcATR(candles, 14);
 
-  console.log(`  Price: ${price.toFixed(5)} | EMA(8): ${ema8.toFixed(5)} | VWAP: ${vwap ? vwap.toFixed(5) : "N/A"} | ATR(14): ${atr ? atr.toFixed(5) : "N/A"}`);
+  console.log(`  Price: ${price.toFixed(5)} | VWAP: ${vwap ? vwap.toFixed(5) : "N/A"} | ATR(14): ${atr ? atr.toFixed(5) : "N/A"}`);
 
   const closed = checkAndClosePositions(symbol, price);
   for (const c of closed) writeCloseCsv(c);
 
-  // Route XAUUSD to ICT Silver Bullet, everything else to VWAP+RSI
   let results, allPass, side, fvg = null;
   const tradeSize = Math.min(CONFIG.portfolioValue * 0.05, CONFIG.maxTradeSizeUSD);
 
@@ -582,19 +574,18 @@ async function runSymbol(symbol, log) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function run() {
-  console.log("═══════════════════════════════════════════════════════════");
-  console.log("  Sameer Trading Bot — Pepperstone");
-  console.log(`  ${new Date().toISOString()}`);
-  console.log(`  Mode: ${CONFIG.paperTrading ? "📋 PAPER" : "🔴 LIVE"} | cTrader: ${isConfigured() ? "✅ Ready" : "⏳ Awaiting KYC"}`);
   if (!CONFIG.tdApiKey) {
-    console.log("\n⚠️  TWELVE_DATA_API_KEY missing in .env");
-    console.log("   Get your free key at https://twelvedata.com\n");
+    console.log("⚠️  TWELVE_DATA_API_KEY missing — set it in Railway Variables.");
     return;
   }
 
   await refreshWatchlist();
   const symbols = getActiveSymbols();
 
+  console.log("═══════════════════════════════════════════════════════════");
+  console.log("  Sameer Trading Bot — Pepperstone");
+  console.log(`  ${new Date().toISOString()}`);
+  console.log(`  Mode: ${CONFIG.paperTrading ? "PAPER" : "LIVE"} | cTrader: ${isConfigured() ? "Ready" : "Awaiting KYC"}`);
   console.log(`  Symbols: ${symbols.join(", ")}`);
   console.log("═══════════════════════════════════════════════════════════");
 
