@@ -1,14 +1,18 @@
 {
-  "name": "claude-tradingview-mcp-trading",
+  "name": "sameer-tradingview-mcp-trading",
   "version": "1.0.0",
-  "description": "Automated trading bot — Claude + TradingView strategy + BitGet execution",
+  "description": "Sameer automated trading bot — Pepperstone/cTrader · Forex/Gold/Tech stocks",
   "main": "bot.js",
+  "type": "module",
   "scripts": {
     "start": "node bot.js",
     "dev": "node bot.js"
   },
   "dependencies": {
+    "chokidar": "^5.0.0",
     "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "googleapis": "^171.4.0",
     "node-fetch": "^3.3.2"
   },
   "engines": {

@@ -1,0 +1,8 @@
+node_modules/
+*.log
+.env
+open-positions.json
+sameer-trades.csv
+run-bot.bat
+run-scanner.bat
+docs/
