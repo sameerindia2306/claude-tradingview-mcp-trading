@@ -214,13 +214,13 @@ function runStockCheck(symbol, candles) {
     check("Price above VWAP — buyers in control", true);
     check("EMA(9) above EMA(21) — uptrend confirmed", true);
     check("RSI(14) in momentum zone (45–65)", rsi14 !== null && rsi14 >= 45 && rsi14 <= 65);
-    check("Volume spike > 1.5x avg", volRatio !== null && volRatio > 1.5);
+    check("Volume above average", volRatio !== null && volRatio > 1.0);
     check("Price within 1.0% of VWAP — near value area", vwap ? Math.abs((price - vwap) / vwap) < 0.010 : false);
   } else if (bearish) {
     check("Price below VWAP — sellers in control", true);
     check("EMA(9) below EMA(21) — downtrend confirmed", true);
     check("RSI(14) in momentum zone (35–55)", rsi14 !== null && rsi14 >= 35 && rsi14 <= 55);
-    check("Volume spike > 1.5x avg", volRatio !== null && volRatio > 1.5);
+    check("Volume above average", volRatio !== null && volRatio > 1.0);
     check("Price within 1.0% of VWAP — near value area", vwap ? Math.abs((price - vwap) / vwap) < 0.010 : false);
   } else {
     check("Market bias — EMA(9)/EMA(21) + VWAP alignment required", false);
