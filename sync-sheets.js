@@ -8,7 +8,12 @@ const CSV_FILE   = process.env.TRADE_LOG_PATH || "C:/Users/spathan/Desktop/trade
 const SHEET_NAME = "Trades";
 
 async function getAuth() {
-  const creds = JSON.parse(readFileSync(CREDS_PATH, "utf8"));
+  let creds;
+  if (process.env.GOOGLE_CREDENTIALS_B64) {
+    creds = JSON.parse(Buffer.from(process.env.GOOGLE_CREDENTIALS_B64, "base64").toString("utf8"));
+  } else {
+    creds = JSON.parse(readFileSync(CREDS_PATH, "utf8"));
+  }
   const auth = new google.auth.GoogleAuth({
     credentials: creds,
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
@@ -144,6 +149,6 @@ export async function syncToSheets() {
 }
 
 // Run directly
-if (process.argv[1].includes("sync-sheets")) {
+if (process.argv[1]?.includes("sync-sheets")) {
   syncToSheets().catch(console.error);
 }
