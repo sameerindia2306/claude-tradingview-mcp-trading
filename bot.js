@@ -32,18 +32,31 @@ const CONFIG = {
   tdApiKey:          process.env.TWELVE_DATA_API_KEY || "",
 };
 
-const CSV_FILE = process.env.TRADE_LOG_PATH || "C:/Users/spathan/Desktop/sameer-trades.csv";
+const CSV_FILE       = process.env.TRADE_LOG_PATH || "C:/Users/spathan/Desktop/sameer-trades.csv";
 const POSITIONS_FILE = "open-positions.json";
 const LOG_FILE       = "safety-check-log.json";
+const WATCHLIST_FILE = "watchlist.json";
 
-// Symbol → Twelve Data format
+// Symbol → Twelve Data format (forex needs slash notation)
 const TD_SYMBOL = {
   EURUSD: "EUR/USD", GBPUSD: "GBP/USD", USDJPY: "USD/JPY",
   AUDUSD: "AUD/USD", USDCAD: "USD/CAD", USDCHF: "USD/CHF",
-  XAUUSD: "XAU/USD", XAGUSD: "XAG/USD",
-  AAPL: "AAPL", TSLA: "TSLA", NVDA: "NVDA",
-  MSFT: "MSFT", AMZN: "AMZN", GOOGL: "GOOGL", META: "META",
+  NZDUSD: "NZD/USD", EURGBP: "EUR/GBP", EURJPY: "EUR/JPY", GBPJPY: "GBP/JPY",
+  XAUUSD: "XAU/USD",
 };
+
+// Always trade XAUUSD (has its own ICT strategy, not scored)
+const ALWAYS_TRADE = ["XAUUSD"];
+
+// Pool of candidates scored each Sunday — top 13 by trend strength + XAUUSD = 14 active
+const SYMBOL_POOL = [
+  // Forex majors + crosses
+  "EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD","EURGBP","EURJPY","GBPJPY",
+  // Tech / growth stocks (Twelve Data uses ticker directly)
+  "AAPL","TSLA","NVDA","MSFT","GOOGL","AMZN","META",
+  "NFLX","AMD","QCOM","CRM","DDOG","AVGO","SPOT",
+  "UBER","SHOP","COIN","PLTR","SNOW","SQ",
+];
 
 const FOREX_PAIRS = new Set(["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD","EURGBP","EURJPY","GBPJPY"]);
 function assetClass(symbol) {
@@ -111,6 +124,57 @@ function calcATR(candles, period = 14) {
     Math.abs(c.low  - candles[i].close)
   ));
   return trs.slice(-period).reduce((a, b) => a + b, 0) / period;
+}
+
+// ─── Weekly Pair Scanner ─────────────────────────────────────────────────────
+
+function isWatchlistStale() {
+  if (!existsSync(WATCHLIST_FILE)) return true;
+  const { updatedAt } = JSON.parse(readFileSync(WATCHLIST_FILE, "utf8"));
+  return Date.now() - new Date(updatedAt).getTime() > 7 * 24 * 60 * 60 * 1000;
+}
+
+async function scoreSymbol(symbol) {
+  try {
+    const candles = await fetchCandles(symbol, 50);
+    const closes  = candles.map(c => c.close);
+    const ema9    = calcEMA(closes, 9);
+    const ema21   = calcEMA(closes, 21);
+    return Math.abs(ema9 - ema21) / ema21 * 100; // trend strength %
+  } catch {
+    return 0;
+  }
+}
+
+async function refreshWatchlist() {
+  const isSunday = new Date().getUTCDay() === 0;
+  if (!isSunday && !isWatchlistStale()) return;
+
+  console.log("[Watchlist] Sunday scan — scoring 30 symbols for trend strength...");
+  const scores = [];
+  for (const sym of SYMBOL_POOL) {
+    const score = await scoreSymbol(sym);
+    console.log(`  ${sym.padEnd(8)} EMA spread: ${score.toFixed(3)}%`);
+    scores.push({ sym, score });
+    await new Promise(r => setTimeout(r, 8000)); // 8s gap → ~7.5 calls/min, safe under free tier
+  }
+
+  const top13 = scores
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 13)
+    .map(s => s.sym);
+
+  const pairs = [...ALWAYS_TRADE, ...top13];
+  writeFileSync(WATCHLIST_FILE, JSON.stringify({ pairs, updatedAt: new Date().toISOString() }, null, 2));
+  console.log(`[Watchlist] Active symbols: ${pairs.join(", ")}`);
+}
+
+function getActiveSymbols() {
+  if (existsSync(WATCHLIST_FILE)) {
+    const wl = JSON.parse(readFileSync(WATCHLIST_FILE, "utf8"));
+    if (wl.pairs?.length) return wl.pairs;
+  }
+  return CONFIG.symbols;
 }
 
 // ─── ICT Silver Bullet (XAUUSD only) ─────────────────────────────────────────
@@ -522,14 +586,17 @@ async function run() {
   console.log("  Sameer Trading Bot — Pepperstone");
   console.log(`  ${new Date().toISOString()}`);
   console.log(`  Mode: ${CONFIG.paperTrading ? "📋 PAPER" : "🔴 LIVE"} | cTrader: ${isConfigured() ? "✅ Ready" : "⏳ Awaiting KYC"}`);
-  console.log(`  Symbols: ${CONFIG.symbols.join(", ")}`);
-  console.log("═══════════════════════════════════════════════════════════");
-
   if (!CONFIG.tdApiKey) {
     console.log("\n⚠️  TWELVE_DATA_API_KEY missing in .env");
     console.log("   Get your free key at https://twelvedata.com\n");
     return;
   }
+
+  await refreshWatchlist();
+  const symbols = getActiveSymbols();
+
+  console.log(`  Symbols: ${symbols.join(", ")}`);
+  console.log("═══════════════════════════════════════════════════════════");
 
   initCsv();
   const log = loadLog();
@@ -546,10 +613,10 @@ async function run() {
     return;
   }
 
-  for (const symbol of CONFIG.symbols) {
+  for (const symbol of symbols) {
     if (todayCount(log) >= CONFIG.maxTradesPerDay) break;
     await runSymbol(symbol, log);
-    await new Promise(r => setTimeout(r, 5000)); // 5s gap → 14 symbols spread across ~70s, staying under 8 credits/min
+    await new Promise(r => setTimeout(r, 5000));
   }
 
   saveLog(log);
