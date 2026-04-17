@@ -2,7 +2,7 @@ import { readFileSync } from "fs";
 import ExcelJS from "exceljs";
 import "dotenv/config";
 
-const CSV_FILE = process.env.TRADE_LOG_PATH || "trades.csv";
+const CSV_FILE = process.env.TRADE_LOG_PATH || "C:/Users/spathan/Desktop/sameer-trades.csv";
 const OUT_FILE = CSV_FILE.replace(".csv", ".xlsx");
 
 const BLUE   = "FF1565C0";

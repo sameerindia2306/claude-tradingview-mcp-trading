@@ -13,6 +13,7 @@ import "dotenv/config";
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from "fs";
 import { placeMarketOrder, isConfigured } from "./ctrader.js";
 import { syncToSheets } from "./sync-sheets.js";
+import { exportToExcel } from "./export-excel.js";
 import http from "http";
 
 // Health check endpoint so Railway can monitor and auto-restart if unresponsive
@@ -521,6 +522,7 @@ async function run() {
   }
 
   saveLog(log);
+  await exportToExcel().catch(err => console.log(`  ⚠️  Excel export failed: ${err.message}`));
   await syncToSheets().catch(err => console.log(`  ⚠️  Sheets sync failed: ${err.message}`));
   console.log("\n═══════════════════════════════════════════════════════════\n");
 }
