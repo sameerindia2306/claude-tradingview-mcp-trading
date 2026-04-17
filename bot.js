@@ -22,13 +22,14 @@ http.createServer((_, res) => res.end("OK")).listen(process.env.PORT || 3000);
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const CONFIG = {
-  symbols:         (process.env.SYMBOLS || "EURUSD,GBPUSD,XAUUSD,AAPL,TSLA,NVDA").split(",").map(s => s.trim()),
-  timeframe:       process.env.TIMEFRAME || "5m",
-  portfolioValue:  parseFloat(process.env.PORTFOLIO_VALUE_USD  || "300"),
-  maxTradeSizeUSD: parseFloat(process.env.MAX_TRADE_SIZE_USD   || "25"),
-  maxTradesPerDay: parseInt(process.env.MAX_TRADES_PER_DAY     || "25"),
-  paperTrading:    process.env.PAPER_TRADING !== "false",
-  tdApiKey:        process.env.TWELVE_DATA_API_KEY || "",
+  symbols:           (process.env.SYMBOLS || "EURUSD,GBPUSD,XAUUSD,AAPL,TSLA,NVDA").split(",").map(s => s.trim()),
+  timeframe:         process.env.TIMEFRAME || "5m",
+  portfolioValue:    parseFloat(process.env.PORTFOLIO_VALUE_USD  || "300"),
+  maxTradeSizeUSD:   parseFloat(process.env.MAX_TRADE_SIZE_USD   || "25"),
+  maxTradesPerDay:   parseInt(process.env.MAX_TRADES_PER_DAY     || "25"),
+  dailyLossLimitPct: parseFloat(process.env.DAILY_LOSS_LIMIT_PCT || "3"),
+  paperTrading:      process.env.PAPER_TRADING !== "false",
+  tdApiKey:          process.env.TWELVE_DATA_API_KEY || "",
 };
 
 const CSV_FILE = process.env.TRADE_LOG_PATH || "C:/Users/spathan/Desktop/sameer-trades.csv";
@@ -49,14 +50,6 @@ function assetClass(symbol) {
   if (symbol.includes("XAU") || symbol.includes("XAG")) return "commodity";
   if (FOREX_PAIRS.has(symbol)) return "forex";
   return "stock"; // any other symbol (AAPL, QCOM, DDOG, etc.)
-}
-
-// ─── Session Filter ───────────────────────────────────────────────────────────
-
-function isInSession(symbol) {
-  const t = new Date().getUTCHours() * 60 + new Date().getUTCMinutes();
-  if (assetClass(symbol) === "stock") return t >= 810 && t < 1200; // NYSE 13:30–20:00 UTC
-  return (t >= 480 && t < 600) || (t >= 780 && t < 960);           // London + NY
 }
 
 // ─── Market Data (Twelve Data) ────────────────────────────────────────────────
@@ -110,10 +103,14 @@ function calcVWAP(candles) {
   return cumTPV / cumVol;
 }
 
-function calcVolumeRatio(candles, period = 20) {
+function calcATR(candles, period = 14) {
   if (candles.length < period + 1) return null;
-  const avg = candles.slice(-period - 1, -1).reduce((s, c) => s + c.volume, 0) / period;
-  return avg === 0 ? null : candles[candles.length - 1].volume / avg;
+  const trs = candles.slice(1).map((c, i) => Math.max(
+    c.high - c.low,
+    Math.abs(c.high - candles[i].close),
+    Math.abs(c.low  - candles[i].close)
+  ));
+  return trs.slice(-period).reduce((a, b) => a + b, 0) / period;
 }
 
 // ─── ICT Silver Bullet (XAUUSD only) ─────────────────────────────────────────
@@ -231,21 +228,18 @@ function runStockCheck(symbol, candles) {
 
 // ─── Forex Combo Strategy — Breakout + EMA Cross + FVG ───────────────────────
 
-function getPreSessionRange(candles, sessionStartUTC, windowMins = 120) {
-  // Build high/low from the consolidation window before a session opens
-  const sessionStart = sessionStartUTC * 60; // minutes since midnight UTC
-  const windowStart  = sessionStart - windowMins;
-  const today        = new Date(); today.setUTCHours(0, 0, 0, 0);
-
-  const windowCandles = candles.filter(c => {
-    const minsIntoDay = (c.time - today.getTime()) / 60000;
-    return minsIntoDay >= windowStart && minsIntoDay < sessionStart;
+function getPreSessionRange(candles, fromUTCHour, toUTCHour) {
+  // Filter candles by UTC hour range; supports wrap-around midnight (e.g. 22–0)
+  const src = candles.filter(c => {
+    const h = new Date(c.time).getUTCHours() + new Date(c.time).getUTCMinutes() / 60;
+    return fromUTCHour < toUTCHour
+      ? h >= fromUTCHour && h < toUTCHour
+      : h >= fromUTCHour || h < toUTCHour; // wraps midnight
   });
-
-  if (windowCandles.length < 3) return null;
+  if (src.length < 3) return null;
   return {
-    high: Math.max(...windowCandles.map(c => c.high)),
-    low:  Math.min(...windowCandles.map(c => c.low)),
+    high: Math.max(...src.map(c => c.high)),
+    low:  Math.min(...src.map(c => c.low)),
   };
 }
 
@@ -271,11 +265,11 @@ function runForexComboCheck(symbol, candles) {
   check(sessionLabel, inAsia || inLondon || inNY);
 
   const range = inAsia
-    ? getPreSessionRange(candles, 0,  120)   // 22:00–00:00 UTC (pre-Asia)
+    ? getPreSessionRange(candles, 22, 0)    // 22:00–00:00 UTC (wraps midnight)
     : inLondon
-    ? getPreSessionRange(candles, 8,  120)   // 06:00–08:00 UTC
+    ? getPreSessionRange(candles, 6,  8)    // 06:00–08:00 UTC
     : inNY
-    ? getPreSessionRange(candles, 13, 120)   // 11:00–13:00 UTC
+    ? getPreSessionRange(candles, 11, 13)   // 11:00–13:00 UTC
     : null;
 
   const bullish = ema9 > ema21 && price > (range?.high ?? price);
@@ -327,32 +321,37 @@ function runForexComboCheck(symbol, candles) {
 function loadPositions() { return existsSync(POSITIONS_FILE) ? JSON.parse(readFileSync(POSITIONS_FILE, "utf8")) : []; }
 function savePositions(p) { writeFileSync(POSITIONS_FILE, JSON.stringify(p, null, 2)); }
 
-function addPosition(symbol, side, price, qty, orderId, paper, fvg = null) {
+function addPosition(symbol, side, price, qty, orderId, paper, fvg = null, atr = null) {
   let sl, tp;
-  if (fvg) {
-    // ICT Silver Bullet: SL beyond FVG edge + 2pt buffer, TP at 2:1
-    const buf = 2.0; // $2 buffer beyond FVG edge
+  const cls = assetClass(symbol);
+
+  if (cls === "commodity" && fvg) {
+    // ICT Silver Bullet: SL beyond FVG edge + small buffer, TP at 2:1
+    const buf  = atr ? atr * 0.3 : 2.0;
     sl = side === "buy"  ? fvg.bottom - buf : fvg.top + buf;
     const risk = Math.abs(price - sl);
     tp = side === "buy"  ? price + risk * 2  : price - risk * 2;
-  } else if (assetClass(symbol) === "stock") {
-    // Moderate risk for stocks: 0.5% SL, 1.5% TP (3:1)
-    sl = side === "buy" ? price * 0.995 : price * 1.005;
-    tp = side === "buy" ? price * 1.015 : price * 0.985;
+  } else if (cls === "stock") {
+    // ATR-based: 1.5× ATR SL, 3× ATR TP (2:1 RR)
+    const dist = atr ? atr * 1.5 : price * 0.005;
+    sl = side === "buy" ? price - dist : price + dist;
+    tp = side === "buy" ? price + dist * 2 : price - dist * 2;
   } else {
-    // Forex combo: SL beyond FVG edge if available, else 0.25% SL, 0.5% TP (2:1)
+    // Forex: FVG-anchored SL if available, else 1.5× ATR, TP always 2:1
+    let risk;
     if (fvg) {
-      const buf = price * 0.0005;
-      sl = side === "buy"  ? fvg.bottom - buf : fvg.top + buf;
-      const risk = Math.abs(price - sl);
-      tp = side === "buy"  ? price + risk * 2  : price - risk * 2;
+      const buf = atr ? atr * 0.2 : price * 0.0005;
+      sl   = side === "buy" ? fvg.bottom - buf : fvg.top + buf;
+      risk = Math.abs(price - sl);
     } else {
-      sl = side === "buy" ? price * 0.9975 : price * 1.0025;
-      tp = side === "buy" ? price * 1.005  : price * 0.995;
+      risk = atr ? atr * 1.5 : price * 0.0025;
+      sl   = side === "buy" ? price - risk : price + risk;
     }
+    tp = side === "buy" ? price + risk * 2 : price - risk * 2;
   }
+
   const pos = loadPositions();
-  pos.push({ symbol, side, entryPrice: price, quantity: qty, orderId, sl, tp, paperTrading: paper, openedAt: new Date().toISOString() });
+  pos.push({ symbol, side, entryPrice: price, quantity: qty, orderId, sl, tp, slMoved: false, paperTrading: paper, openedAt: new Date().toISOString() });
   savePositions(pos);
 }
 
@@ -361,14 +360,28 @@ function checkAndClosePositions(symbol, price) {
   for (const pos of positions) {
     if (pos.symbol !== symbol) { remaining.push(pos); continue; }
     const isLong = pos.side === "buy";
-    const hitTP  = isLong ? price >= pos.tp : price <= pos.tp;
-    const hitSL  = isLong ? price <= pos.sl : price >= pos.sl;
+
+    // Trailing stop: move SL to breakeven once 50% of TP progress is reached
+    if (!pos.slMoved) {
+      const tpDist  = Math.abs(pos.tp - pos.entryPrice);
+      const moved   = isLong ? price - pos.entryPrice : pos.entryPrice - price;
+      if (tpDist > 0 && moved / tpDist >= 0.5) {
+        pos.sl      = pos.entryPrice;
+        pos.slMoved = true;
+        console.log(`  🔒 ${symbol} SL moved to breakeven @ ${pos.entryPrice.toFixed(5)}`);
+      }
+    }
+
+    const hitTP = isLong ? price >= pos.tp : price <= pos.tp;
+    const hitSL = isLong ? price <= pos.sl : price >= pos.sl;
     if (hitTP || hitSL) {
       const exit   = hitTP ? pos.tp : pos.sl;
       const pnlUSD = isLong ? (exit - pos.entryPrice) * pos.quantity : (pos.entryPrice - exit) * pos.quantity;
       const pnlPct = ((exit - pos.entryPrice) / pos.entryPrice) * (isLong ? 100 : -100);
       closed.push({ ...pos, exitPrice: exit, exitTime: new Date().toISOString(), pnlUSD, pnlPct, result: hitTP ? "WIN" : "LOSS" });
-    } else { remaining.push(pos); }
+    } else {
+      remaining.push(pos);
+    }
   }
   savePositions(remaining);
   return closed;
@@ -387,6 +400,17 @@ const CSV_HEADERS = "Date,Time (UTC),Broker,Symbol,Asset Class,Side,Quantity,Ent
 
 function initCsv() {
   if (!existsSync(CSV_FILE)) writeFileSync(CSV_FILE, CSV_HEADERS + "\n");
+}
+
+function getDailyPnL() {
+  if (!existsSync(CSV_FILE)) return 0;
+  const today = new Date().toISOString().slice(0, 10);
+  return readFileSync(CSV_FILE, "utf8").trim().split("\n").slice(1)
+    .filter(l => l.startsWith(today))
+    .reduce((sum, l) => {
+      const pnl = parseFloat(l.split(",")[15]);
+      return sum + (isNaN(pnl) ? 0 : pnl);
+    }, 0);
 }
 
 function writeTradeCsv(entry) {
@@ -436,10 +460,10 @@ async function runSymbol(symbol, log) {
   const closes   = candles.map(c => c.close);
   const price    = closes[closes.length - 1];
   const ema8     = calcEMA(closes, 8);
-  const rsi3     = calcRSI(closes, 3);
   const vwap     = calcVWAP(candles);
+  const atr      = calcATR(candles, 14);
 
-  console.log(`  Price: ${price.toFixed(5)} | EMA(8): ${ema8.toFixed(5)} | VWAP: ${vwap ? vwap.toFixed(5) : "N/A"} | RSI(3): ${rsi3 ? rsi3.toFixed(2) : "N/A"}`);
+  console.log(`  Price: ${price.toFixed(5)} | EMA(8): ${ema8.toFixed(5)} | VWAP: ${vwap ? vwap.toFixed(5) : "N/A"} | ATR(14): ${atr ? atr.toFixed(5) : "N/A"}`);
 
   const closed = checkAndClosePositions(symbol, price);
   for (const c of closed) writeCloseCsv(c);
@@ -468,14 +492,14 @@ async function runSymbol(symbol, log) {
       if (fvg) console.log(`  📐 FVG: ${fvg.bottom.toFixed(2)}–${fvg.top.toFixed(2)} | SL below/above gap | TP 2:1`);
       entry.orderPlaced = true;
       entry.orderId = `PAPER-${Date.now()}`;
-      addPosition(symbol, side, price, qty, entry.orderId, true, fvg);
+      addPosition(symbol, side, price, qty, entry.orderId, true, fvg, atr);
     } else if (isConfigured()) {
       console.log(`  🔴 LIVE ORDER — ${side.toUpperCase()} ${symbol} ~$${tradeSize.toFixed(2)}`);
       try {
         const order = await placeMarketOrder(symbol, side, tradeSize, price);
         entry.orderPlaced = true;
         entry.orderId = order.orderId;
-        addPosition(symbol, side, price, qty, order.orderId, false, fvg);
+        addPosition(symbol, side, price, qty, order.orderId, false, fvg, atr);
         console.log(`  ✅ Order placed — ID: ${order.orderId}`);
       } catch (err) {
         console.log(`  ❌ Order failed: ${err.message}`);
@@ -511,7 +535,14 @@ async function run() {
   const log = loadLog();
 
   if (todayCount(log) >= CONFIG.maxTradesPerDay) {
-    console.log(`\n🚫 Daily limit reached (${CONFIG.maxTradesPerDay}). Stopping.`);
+    console.log(`\n🚫 Daily trade limit reached (${CONFIG.maxTradesPerDay}). Stopping.`);
+    return;
+  }
+
+  const dailyPnL   = getDailyPnL();
+  const lossLimit  = -(CONFIG.portfolioValue * CONFIG.dailyLossLimitPct / 100);
+  if (dailyPnL <= lossLimit) {
+    console.log(`\n🚫 Daily loss limit hit ($${dailyPnL.toFixed(2)} / limit $${lossLimit.toFixed(2)}). Stopping.`);
     return;
   }
 
