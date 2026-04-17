@@ -201,7 +201,6 @@ function runStockCheck(symbol, candles) {
   const ema21    = calcEMA(closes, 21);
   const rsi14    = calcRSI(closes, 14);
   const vwap     = calcVWAP(candles);
-  const volRatio = calcVolumeRatio(candles);
 
   console.log(`  EMA(9): ${ema9.toFixed(3)} | EMA(21): ${ema21.toFixed(3)} | RSI(14): ${rsi14 ? rsi14.toFixed(1) : "N/A"}`);
 
@@ -214,13 +213,11 @@ function runStockCheck(symbol, candles) {
     check("Price above VWAP — buyers in control", true);
     check("EMA(9) above EMA(21) — uptrend confirmed", true);
     check("RSI(14) in momentum zone (45–65)", rsi14 !== null && rsi14 >= 45 && rsi14 <= 65);
-    check("Volume above average", volRatio !== null && volRatio > 1.0);
     check("Price within 1.0% of VWAP — near value area", vwap ? Math.abs((price - vwap) / vwap) < 0.010 : false);
   } else if (bearish) {
     check("Price below VWAP — sellers in control", true);
     check("EMA(9) below EMA(21) — downtrend confirmed", true);
     check("RSI(14) in momentum zone (35–55)", rsi14 !== null && rsi14 >= 35 && rsi14 <= 55);
-    check("Volume above average", volRatio !== null && volRatio > 1.0);
     check("Price within 1.0% of VWAP — near value area", vwap ? Math.abs((price - vwap) / vwap) < 0.010 : false);
   } else {
     check("Market bias — EMA(9)/EMA(21) + VWAP alignment required", false);
@@ -581,7 +578,6 @@ async function runSymbol(symbol, log) {
   const ema8     = calcEMA(closes, 8);
   const rsi3     = calcRSI(closes, 3);
   const vwap     = calcVWAP(candles);
-  const volRatio = calcVolumeRatio(candles);
 
   console.log(`  Price: ${price.toFixed(5)} | EMA(8): ${ema8.toFixed(5)} | VWAP: ${vwap ? vwap.toFixed(5) : "N/A"} | RSI(3): ${rsi3 ? rsi3.toFixed(2) : "N/A"}`);
 
