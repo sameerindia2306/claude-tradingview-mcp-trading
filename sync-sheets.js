@@ -6,13 +6,14 @@ const SHEET_ID   = process.env.GOOGLE_SHEET_ID;
 const CREDS_PATH = process.env.GOOGLE_CREDENTIALS_PATH || "./google-credentials.json";
 const CSV_FILE   = process.env.TRADE_LOG_PATH || "C:/Users/spathan/Desktop/sameer-trades.csv";
 
-const TABS = ["All Trades", "CRYPTO", "FOREX", "GOLD", "TECH"];
+const TABS = ["All Trades", "FOREX", "GOLD", "TECH"];
+
+const FOREX_SYMBOLS = new Set(["EURUSD","GBPUSD","USDJPY","GBPJPY","AUDUSD","USDCAD","USDCHF","NZDUSD","EURGBP","EURJPY"]);
 
 function getCategory(symbol) {
   const s = (symbol || "").toUpperCase().trim();
   if (s === "XAUUSD" || s === "XAUUSDT") return "GOLD";
-  if (/USDT$|USDC$|BUSD$/.test(s))       return "CRYPTO";
-  if (/^[A-Z]{6}$/.test(s))              return "FOREX";
+  if (FOREX_SYMBOLS.has(s))              return "FOREX";
   return "TECH";
 }
 
@@ -130,10 +131,10 @@ export async function syncToSheets() {
   const allRows = [headers, ...dataRows];
 
   // Group by category
-  const byCategory = { CRYPTO: [], FOREX: [], GOLD: [], TECH: [] };
+  const byCategory = { FOREX: [], GOLD: [], TECH: [] };
   for (const row of dataRows) {
     const cat = getCategory(row[3]);
-    byCategory[cat].push(row);
+    if (byCategory[cat]) byCategory[cat].push(row);
   }
 
   const authClient = await getAuth();
@@ -156,10 +157,9 @@ export async function syncToSheets() {
   // Write data to each tab
   const tabData = {
     "All Trades": allRows,
-    CRYPTO: byCategory.CRYPTO.length ? [headers, ...byCategory.CRYPTO] : [headers],
-    FOREX:  byCategory.FOREX.length  ? [headers, ...byCategory.FOREX]  : [headers],
-    GOLD:   byCategory.GOLD.length   ? [headers, ...byCategory.GOLD]   : [headers],
-    TECH:   byCategory.TECH.length   ? [headers, ...byCategory.TECH]   : [headers],
+    FOREX: byCategory.FOREX.length ? [headers, ...byCategory.FOREX] : [headers],
+    GOLD:  byCategory.GOLD.length  ? [headers, ...byCategory.GOLD]  : [headers],
+    TECH:  byCategory.TECH.length  ? [headers, ...byCategory.TECH]  : [headers],
   };
 
   for (const [tab, rows] of Object.entries(tabData)) {
@@ -190,7 +190,7 @@ export async function syncToSheets() {
     });
   }
 
-  const counts = Object.entries(byCategory).map(([k, v]) => `${k}:${v.length}`).join(" ");
+  const counts = Object.entries(byCategory).map(([k, v]) => `${k}:${v.length}`).join(" · ");
   console.log(`[Sheets] Synced ${dataRows.length} trade(s) → ${counts} → https://docs.google.com/spreadsheets/d/${SHEET_ID}`);
 }
 
